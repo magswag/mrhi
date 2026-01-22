@@ -1,5 +1,6 @@
 package mrhi
 
+import "core:c"
 import "core:fmt"
 import "core:os"
 import "vendor:directx/d3d12"
@@ -161,6 +162,11 @@ create_texture :: proc(desc: ^Texture_Desc) -> Texture {
 }
 
 @(require_results)
+create_texture_view :: proc(desc: ^Texture_View_Desc) -> Texture_View {
+	return {}
+}
+
+@(require_results)
 create_shader :: proc() -> Shader {
 	return {}
 }
@@ -173,11 +179,11 @@ create_compute_pipeline :: proc(desc: ^Compute_Pipeline_Desc) -> Compute_Pipelin
 
 @(require_results)
 create_graphics_pipeline :: proc(desc: ^Graphics_Pipeline_Desc) -> Graphics_Pipeline {
-	depth_format := to_format(desc.depth_format.? or_else .Unknown)
+	depth_format := format_map[desc.depth_format.? or_else .Unknown]
 
 	color_formats: [8]dxgi.FORMAT
 	for format, i in desc.color_formats {
-		color_formats[i] = to_format(format)
+		color_formats[i] = format_map[format]
 	}
 
 	hr: d3d12.HRESULT
@@ -186,8 +192,8 @@ create_graphics_pipeline :: proc(desc: ^Graphics_Pipeline_Desc) -> Graphics_Pipe
 		&d3d12.GRAPHICS_PIPELINE_STATE_DESC {
 			pRootSignature = nil,
 			RasterizerState = {
-				FillMode = to_fill_mode(desc.rasterizer.fill_mode),
-				CullMode = to_cull_mode(desc.rasterizer.cull_mode),
+				FillMode = fill_mode_map[desc.rasterizer.fill_mode],
+				CullMode = cull_mode_map[desc.rasterizer.cull_mode],
 			},
 			PrimitiveTopologyType = .TRIANGLE,
 			NumRenderTargets = u32(len(desc.color_formats)),
@@ -208,7 +214,22 @@ create_graphics_pipeline :: proc(desc: ^Graphics_Pipeline_Desc) -> Graphics_Pipe
 	return {}
 }
 
-transition_texture :: proc(
+@(require_results)
+create_blas :: proc(desc: ^Blas_Desc) -> Blas {
+	return {}
+}
+
+@(require_results)
+create_tlas :: proc(desc: ^Tlas_Desc) -> Tlas {
+	return {}
+}
+
+@(require_results)
+get_current_texture_view :: proc(surface: Surface) -> (Texture_View, Command_List) {
+	return {}, {}
+}
+
+cmd_transition_texture :: proc(
 	cmd: Command_List,
 	texture: Texture,
 	src: Texture_Usage_Set,
@@ -217,7 +238,7 @@ transition_texture :: proc(
 
 }
 
-transition_buffer :: proc(
+cmd_transition_buffer :: proc(
 	cmd: Command_List,
 	buffer: Buffer,
 	src: Buffer_Usage_Set,
@@ -226,11 +247,11 @@ transition_buffer :: proc(
 
 }
 
-copy_texture :: proc(cmd: Command_List, src: Buffer, dst: Texture) {
+cmd_copy_texture :: proc(cmd: Command_List, src: Buffer, dst: Texture) {
 
 }
 
-memory_barrier :: proc(cmd: Command_List) {
+cmd_memory_barrier :: proc(cmd: Command_List) {
 
 }
 
@@ -243,7 +264,7 @@ submit :: proc(queue: Queue, cmd: Command_List) {
 
 }
 
-draw :: proc(
+cmd_draw :: proc(
 	cmd: Command_List,
 	vertex_count: u32,
 	instance_count: u32,
@@ -253,7 +274,7 @@ draw :: proc(
 
 }
 
-draw_indirect_count :: proc(
+cmd_draw_indirect_count :: proc(
 	cmd: Command_List,
 	buffer: Buffer,
 	offset: i32,
@@ -265,36 +286,53 @@ draw_indirect_count :: proc(
 
 }
 
-to_fill_mode :: proc "contextless" (mode: Fill_Mode) -> d3d12.FILL_MODE {
-	switch mode {
-	case .Fill:
-		return .SOLID
-	case .Wireframe:
-		return .WIREFRAME
-	}
-	unreachable()
+cmd_set_viewport :: proc(cmd: Command_List, extent: [2]f32) {
+
 }
 
-to_cull_mode :: proc "contextless" (mode: Cull_Mode) -> d3d12.CULL_MODE {
-	switch mode {
-	case .None:
-		return .NONE
-	case .Front:
-		return .FRONT
-	case .Back:
-		return .BACK
-	}
-	unreachable()
+cmd_set_scissor :: proc(cmd: Command_List, extent: [2]u32) {
+
 }
 
-to_format :: proc "contextless" (format: Format) -> dxgi.FORMAT {
-	switch format {
-	case .Unknown:
-		return .UNKNOWN
-	case .RGBA8_sRGB:
-		return .R8G8B8A8_UNORM_SRGB
-	case .D32:
-		return .D32_FLOAT
-	}
-	unreachable()
+cmd_bind_pipeline :: proc(cmd: Command_List, pipeline: Pipeline) {
+}
+
+cmd_begin_rendering :: proc(cmd: Command_List, desc: Render_Desc) {
+
+}
+
+cmd_end_rendering :: proc(cmd: Command_List) {
+
+}
+
+cmd_dispatch :: proc(cmd: Command_List, group_count: [3]u32) {
+
+}
+
+@(private = "file")
+format_map := [Format]dxgi.FORMAT {
+	.Unknown      = .UNKNOWN,
+	.R32_Float    = .R32_FLOAT,
+	.RG32_Float   = .R32G32_FLOAT,
+	.RGB32_Float  = .R32G32B32_FLOAT,
+	.RGBA32_Float = .R32G32B32A32_FLOAT,
+	.R32_Uint     = .R32_UINT,
+	.RG32_Uint    = .R32G32_UINT,
+	.RGB32_Uint   = .R32G32B32_UINT,
+	.RGBA32_Uint  = .R32G32B32A32_UINT,
+	.RGBA8_sRGB   = .R8G8B8A8_UNORM_SRGB,
+	.D32_Float    = .D32_FLOAT,
+}
+
+@(private = "file")
+cull_mode_map := [Cull_Mode]d3d12.CULL_MODE {
+	.None  = .NONE,
+	.Front = .FRONT,
+	.Back  = .BACK,
+}
+
+@(private = "file")
+fill_mode_map := [Fill_Mode]d3d12.FILL_MODE {
+	.Wireframe = .WIREFRAME,
+	.Fill      = .SOLID,
 }
