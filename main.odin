@@ -1,36 +1,36 @@
 package mrhi
 
 main :: proc() {
-	surface := create_surface(nil)
+	init()
+	defer shutdown()
 
-	tlas := create_tlas(&{max_instances = 12, flags = {.Allow_Update}, update_mode = .Build})
-	blas := create_blas(&{flags = {.Prefer_Fast_Trace}})
+	surface := create_surface(nil)
+	defer destroy_surface(surface)
+
+	tlas := create_tlas({max_instances = 12, flags = {.Allow_Update}, update_mode = .Build})
+	defer destroy_tlas(tlas)
+
+	blas := create_blas({flags = {.Prefer_Fast_Trace}})
+	defer destroy_blas(blas)
 
 	buffer := create_buffer(
-		&Buffer_Desc {
-			debug_name = "Buffer",
-			byte_size = 1024,
-			usage = {.Vertex_Read},
-			memory = .CPU,
-		},
+		{debug_name = "Buffer", byte_size = 1024, usage = {.Vertex_Read}, memory = .CPU},
 	)
+	defer destroy_buffer(buffer)
 
 	depth_tex := create_texture(
-		&Texture_Desc {
-			debug_name = "Depth Texture",
-			dimensions = {2048, 2048, 1},
-			format = .D32_Float,
-		},
+		{debug_name = "Depth Texture", dimensions = {2048, 2048, 1}, format = .D32_Float},
 	)
+	defer destroy_texture(depth_tex)
 
-	depth_view := create_texture_view(
-		&Texture_View_Desc{texture = depth_tex, base_mip = 0, base_layer = 0},
-	)
+	depth_view := create_texture_view({texture = depth_tex, base_mip = 0, base_layer = 0})
+	defer destroy_texture_view(depth_view)
 
 	c_shader := create_shader()
+	defer destroy_shader(c_shader)
 
 	g_pipeline := create_graphics_pipeline(
-		&Graphics_Pipeline_Desc {
+		{
 			debug_name = "Graphics Pipeline",
 			rasterizer = {fill_mode = .Fill, cull_mode = .Back, counter_clockwise = true},
 			color_formats = {.RGBA8_sRGB},
@@ -38,16 +38,16 @@ main :: proc() {
 			depth_stencil = {enable_depth = true, enable_stencil = true},
 		},
 	)
+	defer destroy_pipeline(g_pipeline)
 
-	c_pipeline := create_compute_pipeline(
-		&Compute_Pipeline_Desc{debug_name = "Compute Pipeline", shader = c_shader},
-	)
+	c_pipeline := create_compute_pipeline({debug_name = "Compute Pipeline", shader = c_shader})
+	defer destroy_pipeline(c_pipeline)
 
 	out, cmd := get_current_texture_view(surface)
 
 	cmd_begin_rendering(
 		cmd,
-		Render_Desc {
+		{
 			area = {1920, 1080},
 			layer_count = 1,
 			color_attachments = {{view = out, clear_color = {0.1, 0.2, 0.3, 1.0}}},

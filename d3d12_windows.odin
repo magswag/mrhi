@@ -152,17 +152,17 @@ create_surface :: proc(window: ^sdl.Window) -> Surface {
 }
 
 @(require_results)
-create_buffer :: proc(desc: ^Buffer_Desc) -> Buffer {
+create_buffer :: proc(desc: Buffer_Desc) -> Buffer {
 	return {}
 }
 
 @(require_results)
-create_texture :: proc(desc: ^Texture_Desc) -> Texture {
+create_texture :: proc(desc: Texture_Desc) -> Texture {
 	return {}
 }
 
 @(require_results)
-create_texture_view :: proc(desc: ^Texture_View_Desc) -> Texture_View {
+create_texture_view :: proc(desc: Texture_View_Desc) -> Texture_View {
 	return {}
 }
 
@@ -172,13 +172,13 @@ create_shader :: proc() -> Shader {
 }
 
 @(require_results)
-create_compute_pipeline :: proc(desc: ^Compute_Pipeline_Desc) -> Compute_Pipeline {
+create_compute_pipeline :: proc(desc: Compute_Pipeline_Desc) -> Compute_Pipeline {
 
 	return {}
 }
 
 @(require_results)
-create_graphics_pipeline :: proc(desc: ^Graphics_Pipeline_Desc) -> Graphics_Pipeline {
+create_graphics_pipeline :: proc(desc: Graphics_Pipeline_Desc) -> Graphics_Pipeline {
 	depth_format := format_map[desc.depth_format.? or_else .Unknown]
 
 	color_formats: [8]dxgi.FORMAT
@@ -215,14 +215,32 @@ create_graphics_pipeline :: proc(desc: ^Graphics_Pipeline_Desc) -> Graphics_Pipe
 }
 
 @(require_results)
-create_blas :: proc(desc: ^Blas_Desc) -> Blas {
+create_blas :: proc(desc: Blas_Desc) -> Blas {
 	return {}
 }
 
 @(require_results)
-create_tlas :: proc(desc: ^Tlas_Desc) -> Tlas {
+create_tlas :: proc(desc: Tlas_Desc) -> Tlas {
 	return {}
 }
+
+shutdown :: proc() {}
+
+destroy_surface :: proc(surface: Surface) {}
+
+destroy_buffer :: proc(buffer: Buffer) {}
+
+destroy_texture :: proc(texture: Texture) {}
+
+destroy_texture_view :: proc(texture_view: Texture_View) {}
+
+destroy_shader :: proc(shader: Shader) {}
+
+destroy_pipeline :: proc(pipeline: Pipeline) {}
+
+destroy_blas :: proc(blas: Blas) {}
+
+destroy_tlas :: proc(tlas: Tlas) {}
 
 @(require_results)
 get_current_texture_view :: proc(surface: Surface) -> (Texture_View, Command_List) {
