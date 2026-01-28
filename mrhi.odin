@@ -117,6 +117,13 @@ Cull_Mode :: enum u8 {
 	Front,
 }
 
+Msaa_Sample_Count :: enum u8 {
+	x1,
+	x2,
+	x4,
+	x8,
+}
+
 Shader_Stage_Desc :: struct {
 	shader: Shader,
 	entry:  string,
@@ -139,6 +146,7 @@ Graphics_Pipeline_Desc :: struct {
 		enable_depth:   bool,
 		enable_stencil: bool,
 	},
+	msaa_samples:   Msaa_Sample_Count,
 }
 
 Compute_Pipeline_Desc :: struct {
@@ -188,7 +196,8 @@ Render_Desc :: struct {
 }
 
 Surface_Config :: struct {
-	extent:       [2]u32,
-	format:       Format,
-	present_mode: Present_Mode,
+	extent:                   [2]u32,
+	format:                   Format,
+	present_mode:             Present_Mode,
+	desired_frames_in_flight: u32,
 }

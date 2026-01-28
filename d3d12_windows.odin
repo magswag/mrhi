@@ -2,10 +2,45 @@ package mrhi
 
 import "core:c"
 import "core:fmt"
+import "core:math/fixed"
 import "core:os"
+import "core:sys/windows"
 import "vendor:directx/d3d12"
 import "vendor:directx/dxgi"
 import sdl "vendor:sdl3"
+
+Rtv :: distinct d3d12.CPU_DESCRIPTOR_HANDLE
+Uav :: distinct d3d12.CPU_DESCRIPTOR_HANDLE
+Dsv :: distinct d3d12.CPU_DESCRIPTOR_HANDLE
+
+@(private = "file")
+D3d12_Texture_View_Type :: union {
+	Rtv,
+	Uav,
+	Dsv,
+}
+
+@(private = "file")
+D3d12_Swapchain :: struct {
+	raw:         ^dxgi.ISwapChain3,
+	rtv_heap:    ^d3d12.IDescriptorHeap,
+	frame_index: int,
+	fence:       ^d3d12.IFence,
+	fence_event: windows.HANDLE,
+	frame_datas: [3]struct {
+		cmd_allocator: ^d3d12.ICommandAllocator,
+		cmd:           Command_List,
+		texture:       Texture,
+		view:          Texture_View,
+		fence_value:   u64,
+	},
+}
+
+@(private = "file")
+D3d12_Texture :: struct {
+	initialized: bool,
+	resource:    ^d3d12.IResource,
+}
 
 @(private = "file")
 D3D12_Context :: struct {
@@ -13,10 +48,12 @@ D3D12_Context :: struct {
 	adapter:                ^dxgi.IAdapter1,
 	device:                 ^d3d12.IDevice,
 	cmd_queue:              ^d3d12.ICommandQueue,
-	pool_surface:           Resource_Pool(5, Surface, ^dxgi.ISwapChain3, bool),
+	pool_surface:           Resource_Pool(5, Surface, D3d12_Swapchain, bool),
 	pool_cmd_list:          Resource_Pool(10, Command_List, ^d3d12.ICommandList, bool),
 	pool_graphics_pipeline: Resource_Pool(10, Graphics_Pipeline, ^d3d12.IPipelineState, bool),
 	pool_compute_pipeline:  Resource_Pool(10, Compute_Pipeline, ^d3d12.IPipelineState, bool),
+	pool_texture:           Resource_Pool(32, Texture, D3d12_Texture, bool),
+	pool_texture_view:      Resource_Pool(32, Texture_View, D3d12_Texture_View_Type, bool),
 }
 
 @(private = "file")
@@ -48,7 +85,7 @@ init :: proc() {
 
 	error_not_found := dxgi.HRESULT(-142213123)
 
-	for i: u32 = 0; ctx.factory->EnumAdapters1(i, &ctx.adapter) != error_not_found; i += 1 {
+	for i: u32 = 0; ctx.factory->EnumAdapters1(i, &ctx.adapter) != dxgi.ERROR_NOT_FOUND; i += 1 {
 		desc: dxgi.ADAPTER_DESC1
 		ctx.adapter->GetDesc1(&desc)
 
@@ -56,7 +93,8 @@ init :: proc() {
 			continue
 		}
 
-		if d3d12.CreateDevice((^dxgi.IUnknown)(ctx.adapter), ._12_0, dxgi.IDevice_UUID, nil) >= 0 {
+		if d3d12.CreateDevice(cast(^dxgi.IUnknown)ctx.adapter, ._12_0, dxgi.IDevice_UUID, nil) >=
+		   0 {
 			break
 		} else {
 			fmt.println("Failed to create device")
@@ -69,10 +107,10 @@ init :: proc() {
 	}
 
 	hr = d3d12.CreateDevice(
-		(^dxgi.IUnknown)(ctx.adapter),
+		cast(^dxgi.IUnknown)ctx.adapter,
 		._12_0,
 		d3d12.IDevice_UUID,
-		(^rawptr)(&ctx.device),
+		cast(^rawptr)&ctx.device,
 	)
 	check(hr, "Failed to create device")
 
@@ -92,6 +130,8 @@ init :: proc() {
 	res_pool_init(&ctx.pool_cmd_list)
 	res_pool_init(&ctx.pool_compute_pipeline)
 	res_pool_init(&ctx.pool_graphics_pipeline)
+	res_pool_init(&ctx.pool_texture)
+	res_pool_init(&ctx.pool_texture_view)
 }
 
 @(require_results)
@@ -110,7 +150,7 @@ create_surface :: proc(window: ^sdl.Window) -> Surface {
 
 	swapchain: ^dxgi.ISwapChain3
 	hr = ctx.factory->CreateSwapChainForHwnd(
-		(^dxgi.IUnknown)(ctx.cmd_queue),
+		cast(^dxgi.IUnknown)ctx.cmd_queue,
 		window_handle,
 		&dxgi.SWAP_CHAIN_DESC1 {
 			Width = u32(w),
@@ -125,15 +165,15 @@ create_surface :: proc(window: ^sdl.Window) -> Surface {
 		},
 		nil,
 		nil,
-		(^^dxgi.ISwapChain1)(&swapchain),
+		cast(^^dxgi.ISwapChain1)&swapchain,
 	)
 	check(hr, "Failed to create swap chain")
 
 	desc_heap: ^d3d12.IDescriptorHeap
 	hr = ctx.device->CreateDescriptorHeap(
 		&d3d12.DESCRIPTOR_HEAP_DESC{NumDescriptors = 3, Type = .RTV, Flags = {}},
-		d3d12.IHeap_UUID,
-		(^rawptr)(desc_heap),
+		d3d12.IDescriptorHeap_UUID,
+		cast(^rawptr)&desc_heap,
 	)
 	check(hr, "Failed to create descriptor heap")
 
@@ -154,7 +194,10 @@ create_surface :: proc(window: ^sdl.Window) -> Surface {
 		rtv_handle.ptr += uint(rtv_desc_size)
 	}
 
-	return res_pool_insert(&ctx.pool_surface, swapchain)
+	return res_pool_insert(
+		&ctx.pool_surface,
+		D3d12_Swapchain{raw = swapchain, rtv_heap = desc_heap},
+	)
 }
 
 configure_surface :: proc(surface: Surface, config: Surface_Config) {
@@ -240,6 +283,8 @@ shutdown :: proc() {
 	res_pool_destroy(&ctx.pool_cmd_list)
 	res_pool_destroy(&ctx.pool_compute_pipeline)
 	res_pool_destroy(&ctx.pool_graphics_pipeline)
+	res_pool_destroy(&ctx.pool_texture)
+	res_pool_destroy(&ctx.pool_texture_view)
 }
 
 destroy_surface :: proc(surface: Surface) {}
@@ -272,7 +317,39 @@ destroy_tlas :: proc(tlas: Tlas) {}
 
 @(require_results)
 get_current_texture_view :: proc(surface: Surface) -> (Texture_View, Command_List) {
-	return {}, {}
+	surface := res_pool_get_hot(&ctx.pool_surface, surface)
+
+	swapchain := surface.raw
+	frame_index := swapchain->GetCurrentBackBufferIndex()
+	frame_data := &surface.frame_datas[frame_index]
+	frame_tex := res_pool_get_hot(&ctx.pool_texture, frame_data.texture)
+
+	cmd := cast(^d3d12.IGraphicsCommandList)res_pool_get_hot(&ctx.pool_cmd_list, frame_data.cmd)
+
+	hr: d3d12.HRESULT
+
+	// Reset
+	hr = frame_data.cmd_allocator->Reset()
+	check(hr, "Failed to reset command allocator")
+
+	cmd->Reset(frame_data.cmd_allocator, nil)
+
+
+	// PRESENT -> RENDER_TARGET
+	barrier := d3d12.RESOURCE_BARRIER {
+		Type = .TRANSITION,
+		Flags = {},
+		Transition = {
+			pResource = frame_tex.resource,
+			StateBefore = d3d12.RESOURCE_STATE_PRESENT,
+			StateAfter = {.RENDER_TARGET},
+			Subresource = d3d12.RESOURCE_BARRIER_ALL_SUBRESOURCES,
+		},
+	}
+
+	cmd->ResourceBarrier(1, &barrier)
+
+	return frame_data.view, frame_data.cmd
 }
 
 cmd_transition_texture :: proc(
@@ -313,6 +390,60 @@ submit :: proc(queue: Queue, cmd: Command_List) {
 
 	cmd->Close()
 	ctx.cmd_queue->ExecuteCommandLists(1, (^^d3d12.ICommandList)(&cmd))
+}
+
+submit_and_present :: proc(cmd: Command_List, surface: Surface) {
+	cmd := cast(^d3d12.IGraphicsCommandList)res_pool_get_hot(&ctx.pool_cmd_list, cmd)
+	surface := res_pool_get_hot(&ctx.pool_surface, surface)
+
+	swapchain := surface.raw
+
+	hr: d3d12.HRESULT
+
+	frame_index := surface.frame_index
+	frame := &surface.frame_datas[frame_index]
+	frame_tex := res_pool_get_hot(&ctx.pool_texture, frame.texture)
+
+	// RENDER_TARGET -> PRESENT
+	barrier := d3d12.RESOURCE_BARRIER {
+		Type = .TRANSITION,
+		Flags = {},
+		Transition = {
+			pResource = frame_tex.resource,
+			StateBefore = {.RENDER_TARGET},
+			StateAfter = d3d12.RESOURCE_STATE_PRESENT,
+			Subresource = d3d12.RESOURCE_BARRIER_ALL_SUBRESOURCES,
+		},
+	}
+
+	cmd->ResourceBarrier(1, &barrier)
+
+	hr = cmd->Close()
+	check(hr, "Failed to close command list")
+
+	// Execute
+	ctx.cmd_queue->ExecuteCommandLists(1, (^^d3d12.ICommandList)(&cmd))
+
+	// Present
+	hr = swapchain->Present1(1, dxgi.PRESENT{}, &dxgi.PRESENT_PARAMETERS{})
+	check(hr, "Failed to present")
+
+	// Wait for frame to finish
+	current_fence_value := frame.fence_value
+
+	ctx.cmd_queue->Signal(surface.fence, current_fence_value)
+
+	fi := swapchain->GetCurrentBackBufferIndex()
+	surface.frame_index = int(fi)
+	frame2 := &surface.frame_datas[fi]
+
+	if surface.fence->GetCompletedValue() < frame2.fence_value {
+		surface.fence->SetEventOnCompletion(frame2.fence_value, surface.fence_event)
+
+		windows.WaitForSingleObject(surface.fence_event, 12000000)
+	}
+
+	surface.frame_datas[fi].fence_value = current_fence_value + 1
 }
 
 cmd_draw :: proc(
@@ -374,14 +505,28 @@ cmd_bind_pipeline :: proc(cmd: Command_List, pipeline: Pipeline) {
 cmd_begin_rendering :: proc(cmd: Command_List, desc: Render_Desc) {
 	cmd := cast(^d3d12.IGraphicsCommandList)res_pool_get_hot(&ctx.pool_cmd_list, cmd)
 
-	// for &color_attachment in desc.color_attachments {
-	// 	cmd->ClearRenderTargetView(rtv_handle, color_attachment.clear_color, 0, nil)
-	// }
+	num_render_targets := len(desc.color_attachments)
+	render_target_descs := [4]d3d12.CPU_DESCRIPTOR_HANDLE{}
+
+	for &color_attachment, i in desc.color_attachments {
+		render_target_descs[i] = cast(d3d12.CPU_DESCRIPTOR_HANDLE)res_pool_get_hot(
+			&ctx.pool_texture_view,
+			color_attachment.view,
+		).(Rtv)
+	}
+
+	cmd->OMSetRenderTargets(u32(num_render_targets), raw_data(&render_target_descs), false, nil)
+
+	// Clear color targets
+	for i in 0 ..< num_render_targets {
+		clear_color := &desc.color_attachments[i].clear_color
+		cmd->ClearRenderTargetView(render_target_descs[i], clear_color, 0, nil)
+	}
+
+	cmd->IASetPrimitiveTopology(.TRIANGLELIST)
 }
 
-cmd_end_rendering :: proc(cmd: Command_List) {
-
-}
+cmd_end_rendering :: proc(cmd: Command_List) {}
 
 cmd_dispatch :: proc(cmd: Command_List, group_count: [3]u32) {
 	cmd := cast(^d3d12.IGraphicsCommandList)res_pool_get_hot(&ctx.pool_cmd_list, cmd)

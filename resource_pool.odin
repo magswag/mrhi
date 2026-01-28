@@ -13,10 +13,10 @@ Resource_Pool :: struct($capacity: u16, $HandleT: typeid, $Hot: typeid, $Cold: t
 }
 
 res_pool_init :: proc(pool: ^Resource_Pool($capacity, $HandleT/Handle, $Hot, $Cold)) {
-	pool.hot = make([dynamic]Hot, 0, capacity)
-	pool.cold = make([dynamic]Cold, 0, capacity)
+	pool.hot = make([dynamic]Hot, capacity)
+	pool.cold = make([dynamic]Cold, capacity)
 	pool.generations = make([dynamic]u16, capacity)
-	pool.free_list = make([dynamic]u16, 0, capacity)
+	pool.free_list = make([dynamic]u16, capacity)
 
 	for i in 0 ..< capacity {
 		append(&pool.free_list, capacity - i)
