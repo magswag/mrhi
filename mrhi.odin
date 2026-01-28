@@ -1,31 +1,66 @@
 package mrhi
 
-Queue :: enum {
+Present_Mode :: enum u8 {
+	Fifo,
+	Immediate,
+	Mailbox,
+}
+
+Queue :: enum u8 {
 	Graphics,
 	Compute,
 	Transfer,
 }
 
-Format :: enum {
+Format :: enum u8 {
 	Unknown,
-	R32_Float,
-	RG32_Float,
-	RGB32_Float,
-	RGBA32_Float,
-	R32_Uint,
-	RG32_Uint,
-	RGB32_Uint,
-	RGBA32_Uint,
-	RGBA8_sRGB,
-	D32_Float,
+
+	// 8-bit Unsigned Normalized
+	R8_Unorm,
+	RG8_Unorm,
+	RGBA8_Unorm,
+	BGRA8_Unorm,
+
+	// 8-bit sRGB
+	RGBA8_Srgb,
+	BGRA8_Srgb,
+
+	// 32-bit Floating Point
+	R32_F,
+	RG32_F,
+	RGB32_F,
+	RGBA32_F,
+
+	// 32-bit Unsigned Integer
+	R32_U,
+	RG32_U,
+	RGB32_U,
+	RGBA32_U,
+
+	// Depth
+	D32_F,
+
+	// Compressed (Block)
+	BC1_Unorm,
+	BC1_Srgb,
+	BC3_Unorm,
+	BC3_Srgb,
+	BC4_Unorm,
+	BC4_Snorm,
+	BC5_Unorm,
+	BC5_Snorm,
+	BC6H_Uf16,
+	BC6H_Sf16,
+	BC7_Unorm,
+	BC7_Srgb,
 }
 
-Memory :: enum {
+Memory :: enum u8 {
 	CPU,
 	GPU,
 }
 
-Buffer_Usage :: enum {
+Buffer_Usage :: enum u8 {
 	Vertex_Read,
 	Index_Read,
 	Shader_Read,
@@ -44,7 +79,7 @@ Buffer_Desc :: struct {
 	memory:     Memory,
 }
 
-Texture_Usage :: enum {
+Texture_Usage :: enum u8 {
 	Shader_Read,
 	Shader_Write,
 	Color_Write,
@@ -71,27 +106,36 @@ Texture_View_Desc :: struct {
 }
 
 // Graphics pipeline
-Fill_Mode :: enum {
+Fill_Mode :: enum u8 {
 	Fill,
 	Wireframe,
 }
 
-Cull_Mode :: enum {
+Cull_Mode :: enum u8 {
 	None,
 	Back,
 	Front,
 }
 
+Shader_Stage_Desc :: struct {
+	shader: Shader,
+	entry:  string,
+}
+
 Graphics_Pipeline_Desc :: struct {
-	debug_name:    Maybe(string),
-	rasterizer:    struct {
+	debug_name:     Maybe(string),
+	task_stage:     Maybe(Shader_Stage_Desc),
+	mesh_stage:     Maybe(Shader_Stage_Desc),
+	vertex_stage:   Maybe(Shader_Stage_Desc),
+	fragment_stage: Maybe(Shader_Stage_Desc),
+	rasterizer:     struct {
 		fill_mode:         Fill_Mode,
 		cull_mode:         Cull_Mode,
 		counter_clockwise: bool,
 	},
-	color_formats: []Format,
-	depth_format:  Maybe(Format),
-	depth_stencil: struct {
+	color_formats:  []Format,
+	depth_format:   Maybe(Format),
+	depth_stencil:  struct {
 		enable_depth:   bool,
 		enable_stencil: bool,
 	},
@@ -104,12 +148,12 @@ Compute_Pipeline_Desc :: struct {
 
 Ray_Tracing_Pipeline_Desc :: struct {}
 
-Accel_Struct_Update_Mode :: enum {
+Accel_Struct_Update_Mode :: enum u8 {
 	Build,
 	Prefer_Update,
 }
 
-Accel_Struct_Flags :: enum {
+Accel_Struct_Flags :: enum u8 {
 	Allow_Update,
 	Allow_Compaction,
 	Prefer_Fast_Trace,
@@ -141,4 +185,10 @@ Render_Desc :: struct {
 		clear_color:  [4]f32,
 	},
 	depth_attachment:  Maybe(Texture_View),
+}
+
+Surface_Config :: struct {
+	extent:       [2]u32,
+	format:       Format,
+	present_mode: Present_Mode,
 }

@@ -7,6 +7,11 @@ main :: proc() {
 	surface := create_surface(nil)
 	defer destroy_surface(surface)
 
+	configure_surface(
+		surface,
+		{extent = {1920, 1080}, format = .BGRA8_Unorm, present_mode = .Immediate},
+	)
+
 	tlas := create_tlas({max_instances = 12, flags = {.Allow_Update}, update_mode = .Build})
 	defer destroy_tlas(tlas)
 
@@ -29,9 +34,17 @@ main :: proc() {
 	c_shader := create_shader()
 	defer destroy_shader(c_shader)
 
+	v_shader := create_shader()
+	defer destroy_shader(v_shader)
+
+	f_shader := create_shader()
+	defer destroy_shader(f_shader)
+
 	g_pipeline := create_graphics_pipeline(
 		{
 			debug_name = "Graphics Pipeline",
+			vertex_stage = Shader_Stage_Desc{shader = v_shader, entry = "main"},
+			fragment_stage = Shader_Stage_Desc{shader = f_shader, entry = "main"},
 			rasterizer = {fill_mode = .Fill, cull_mode = .Back, counter_clockwise = true},
 			color_formats = {.RGBA8_sRGB},
 			depth_format = .D32_Float,
@@ -55,9 +68,13 @@ main :: proc() {
 		},
 	)
 
+	cmd_bind_pipeline(cmd, g_pipeline)
 	cmd_draw(cmd, 6, 1, 0, 0)
 
 	cmd_end_rendering(cmd)
+
+	cmd_bind_pipeline(cmd, c_pipeline)
+	cmd_dispatch(cmd, {64, 1, 1})
 
 	cmd_transition_texture(cmd, depth_tex, {.Copy_Dst}, {.Shader_Read})
 

@@ -9,11 +9,14 @@ import sdl "vendor:sdl3"
 
 @(private = "file")
 D3D12_Context :: struct {
-	factory:      ^dxgi.IFactory6,
-	adapter:      ^dxgi.IAdapter1,
-	device:       ^d3d12.IDevice,
-	cmd_queue:    ^d3d12.ICommandQueue,
-	pool_surface: Resource_Pool(5, Surface, ^dxgi.ISwapChain3, bool),
+	factory:                ^dxgi.IFactory6,
+	adapter:                ^dxgi.IAdapter1,
+	device:                 ^d3d12.IDevice,
+	cmd_queue:              ^d3d12.ICommandQueue,
+	pool_surface:           Resource_Pool(5, Surface, ^dxgi.ISwapChain3, bool),
+	pool_cmd_list:          Resource_Pool(10, Command_List, ^d3d12.ICommandList, bool),
+	pool_graphics_pipeline: Resource_Pool(10, Graphics_Pipeline, ^d3d12.IPipelineState, bool),
+	pool_compute_pipeline:  Resource_Pool(10, Compute_Pipeline, ^d3d12.IPipelineState, bool),
 }
 
 @(private = "file")
@@ -86,6 +89,9 @@ init :: proc() {
 
 
 	res_pool_init(&ctx.pool_surface)
+	res_pool_init(&ctx.pool_cmd_list)
+	res_pool_init(&ctx.pool_compute_pipeline)
+	res_pool_init(&ctx.pool_graphics_pipeline)
 }
 
 @(require_results)
@@ -151,6 +157,10 @@ create_surface :: proc(window: ^sdl.Window) -> Surface {
 	return res_pool_insert(&ctx.pool_surface, swapchain)
 }
 
+configure_surface :: proc(surface: Surface, config: Surface_Config) {
+
+}
+
 @(require_results)
 create_buffer :: proc(desc: Buffer_Desc) -> Buffer {
 	return {}
@@ -188,6 +198,7 @@ create_graphics_pipeline :: proc(desc: Graphics_Pipeline_Desc) -> Graphics_Pipel
 
 	hr: d3d12.HRESULT
 	pso: ^d3d12.IPipelineState
+
 	hr = ctx.device->CreateGraphicsPipelineState(
 		&d3d12.GRAPHICS_PIPELINE_STATE_DESC {
 			pRootSignature = nil,
@@ -224,7 +235,12 @@ create_tlas :: proc(desc: Tlas_Desc) -> Tlas {
 	return {}
 }
 
-shutdown :: proc() {}
+shutdown :: proc() {
+	res_pool_destroy(&ctx.pool_surface)
+	res_pool_destroy(&ctx.pool_cmd_list)
+	res_pool_destroy(&ctx.pool_compute_pipeline)
+	res_pool_destroy(&ctx.pool_graphics_pipeline)
+}
 
 destroy_surface :: proc(surface: Surface) {}
 
@@ -236,7 +252,19 @@ destroy_texture_view :: proc(texture_view: Texture_View) {}
 
 destroy_shader :: proc(shader: Shader) {}
 
-destroy_pipeline :: proc(pipeline: Pipeline) {}
+destroy_pipeline :: proc(pipeline: Pipeline) {
+	pipeline_state: ^d3d12.IPipelineState
+
+	switch pip in pipeline {
+	case Graphics_Pipeline:
+		pipeline_state = res_pool_get_hot(&ctx.pool_graphics_pipeline, pip)
+
+	case Compute_Pipeline:
+		pipeline_state = res_pool_get_hot(&ctx.pool_compute_pipeline, pip)
+	}
+
+	pipeline_state->Release()
+}
 
 destroy_blas :: proc(blas: Blas) {}
 
@@ -266,7 +294,9 @@ cmd_transition_buffer :: proc(
 }
 
 cmd_copy_texture :: proc(cmd: Command_List, src: Buffer, dst: Texture) {
+	cmd := cast(^d3d12.IGraphicsCommandList)res_pool_get_hot(&ctx.pool_cmd_list, cmd)
 
+	//cmd->CopyTextureRegion()
 }
 
 cmd_memory_barrier :: proc(cmd: Command_List) {
@@ -279,7 +309,10 @@ acquire_command_list :: proc() -> Command_List {
 }
 
 submit :: proc(queue: Queue, cmd: Command_List) {
+	cmd := cast(^d3d12.IGraphicsCommandList)res_pool_get_hot(&ctx.pool_cmd_list, cmd)
 
+	cmd->Close()
+	ctx.cmd_queue->ExecuteCommandLists(1, (^^d3d12.ICommandList)(&cmd))
 }
 
 cmd_draw :: proc(
@@ -289,7 +322,9 @@ cmd_draw :: proc(
 	first_vertex: u32,
 	first_instance: u32,
 ) {
+	cmd := cast(^d3d12.IGraphicsCommandList)res_pool_get_hot(&ctx.pool_cmd_list, cmd)
 
+	cmd->DrawInstanced(vertex_count, instance_count, first_vertex, first_instance)
 }
 
 cmd_draw_indirect_count :: proc(
@@ -301,22 +336,47 @@ cmd_draw_indirect_count :: proc(
 	max_draw_count: u32,
 	stride: u32,
 ) {
-
+	cmd := cast(^d3d12.IGraphicsCommandList)res_pool_get_hot(&ctx.pool_cmd_list, cmd)
 }
 
 cmd_set_viewport :: proc(cmd: Command_List, extent: [2]f32) {
+	cmd := cast(^d3d12.IGraphicsCommandList)res_pool_get_hot(&ctx.pool_cmd_list, cmd)
 
+	cmd->RSSetViewports(1, &d3d12.VIEWPORT{Width = extent.x, Height = extent.y})
 }
 
 cmd_set_scissor :: proc(cmd: Command_List, extent: [2]u32) {
+	cmd := cast(^d3d12.IGraphicsCommandList)res_pool_get_hot(&ctx.pool_cmd_list, cmd)
 
+	cmd->RSSetScissorRects(
+		1,
+		&d3d12.RECT{left = 0, right = i32(extent.x), top = 0, bottom = i32(extent.y)},
+	)
 }
 
 cmd_bind_pipeline :: proc(cmd: Command_List, pipeline: Pipeline) {
+	cmd := cast(^d3d12.IGraphicsCommandList)res_pool_get_hot(&ctx.pool_cmd_list, cmd)
+
+	pipeline_state: ^d3d12.IPipelineState
+
+	switch pip in pipeline {
+	case Graphics_Pipeline:
+		pipeline_state = res_pool_get_hot(&ctx.pool_graphics_pipeline, pip)
+
+	case Compute_Pipeline:
+		pipeline_state = res_pool_get_hot(&ctx.pool_compute_pipeline, pip)
+
+	}
+
+	cmd->SetPipelineState(pipeline_state)
 }
 
 cmd_begin_rendering :: proc(cmd: Command_List, desc: Render_Desc) {
+	cmd := cast(^d3d12.IGraphicsCommandList)res_pool_get_hot(&ctx.pool_cmd_list, cmd)
 
+	// for &color_attachment in desc.color_attachments {
+	// 	cmd->ClearRenderTargetView(rtv_handle, color_attachment.clear_color, 0, nil)
+	// }
 }
 
 cmd_end_rendering :: proc(cmd: Command_List) {
@@ -324,22 +384,41 @@ cmd_end_rendering :: proc(cmd: Command_List) {
 }
 
 cmd_dispatch :: proc(cmd: Command_List, group_count: [3]u32) {
+	cmd := cast(^d3d12.IGraphicsCommandList)res_pool_get_hot(&ctx.pool_cmd_list, cmd)
 
+	cmd->Dispatch(group_count.x, group_count.y, group_count.z)
 }
 
 @(private = "file")
 format_map := [Format]dxgi.FORMAT {
-	.Unknown      = .UNKNOWN,
-	.R32_Float    = .R32_FLOAT,
-	.RG32_Float   = .R32G32_FLOAT,
-	.RGB32_Float  = .R32G32B32_FLOAT,
-	.RGBA32_Float = .R32G32B32A32_FLOAT,
-	.R32_Uint     = .R32_UINT,
-	.RG32_Uint    = .R32G32_UINT,
-	.RGB32_Uint   = .R32G32B32_UINT,
-	.RGBA32_Uint  = .R32G32B32A32_UINT,
-	.RGBA8_sRGB   = .R8G8B8A8_UNORM_SRGB,
-	.D32_Float    = .D32_FLOAT,
+	.Unknown     = .UNKNOWN,
+	.R8_Unorm    = .R8_UNORM,
+	.RG8_Unorm   = .R8G8_UNORM,
+	.RGBA8_Unorm = .R8G8B8A8_UNORM,
+	.BGRA8_Unorm = .B8G8R8A8_UNORM,
+	.RGBA8_Srgb  = .R8G8B8A8_UNORM_SRGB,
+	.BGRA8_Srgb  = .B8G8R8A8_UNORM_SRGB,
+	.R32_F       = .R32_FLOAT,
+	.RG32_F      = .R32G32_FLOAT,
+	.RGB32_F     = .R32G32B32_FLOAT,
+	.RGBA32_F    = .R32G32B32A32_FLOAT,
+	.R32_U       = .R32_UINT,
+	.RG32_U      = .R32G32_UINT,
+	.RGB32_U     = .R32G32B32_UINT,
+	.RGBA32_U    = .R32G32B32A32_UINT,
+	.D32_F       = .D32_FLOAT,
+	.BC1_Unorm   = .BC1_UNORM,
+	.BC1_Srgb    = .BC1_UNORM_SRGB,
+	.BC3_Unorm   = .BC3_UNORM,
+	.BC3_Srgb    = .BC3_UNORM_SRGB,
+	.BC4_Unorm   = .BC4_UNORM,
+	.BC4_Snorm   = .BC4_SNORM,
+	.BC5_Unorm   = .BC5_UNORM,
+	.BC5_Snorm   = .BC5_SNORM,
+	.BC6H_Uf16   = .BC6H_UF16,
+	.BC6H_Sf16   = .BC6H_SF16,
+	.BC7_Unorm   = .BC7_UNORM,
+	.BC7_Srgb    = .BC7_UNORM_SRGB,
 }
 
 @(private = "file")
