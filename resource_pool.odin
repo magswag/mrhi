@@ -26,6 +26,7 @@ res_pool_init :: proc(pool: ^Resource_Pool($capacity, $HandleT/Handle, $Hot, $Co
 res_pool_insert :: proc(
 	pool: ^Resource_Pool($capacity, $HandleT/Handle, $Hot, $Cold),
 	hot: Hot,
+	cold: Cold,
 ) -> HandleT {
 	index := pop(&pool.free_list)
 	pool.hot[index] = hot
@@ -37,15 +38,15 @@ res_pool_insert :: proc(
 res_pool_get_hot :: proc(
 	pool: ^Resource_Pool($capacity, $HandleT/Handle, $Hot, $Cold),
 	handle: HandleT,
-) -> Hot {
-	return pool.hot[handle.index]
+) -> ^Hot {
+	return &pool.hot[handle.index]
 }
 
 res_pool_get_cold :: proc(
 	pool: ^Resource_Pool($capacity, $HandleT/Handle, $Hot, $Cold),
 	handle: HandleT,
-) -> Cold {
-	return pool.cold[handle.index]
+) -> ^Cold {
+	return &pool.cold[handle.index]
 }
 
 res_pool_destroy :: proc(pool: ^Resource_Pool($capacity, $HandleT/Handle, $Hot, $Cold)) {

@@ -37,6 +37,11 @@ D3d12_Swapchain :: struct {
 }
 
 @(private = "file")
+D3d12_Swapchain_Data :: struct {
+	config: Surface_Config,
+}
+
+@(private = "file")
 D3d12_Texture :: struct {
 	initialized: bool,
 	resource:    ^d3d12.IResource,
@@ -48,7 +53,7 @@ D3D12_Context :: struct {
 	adapter:                ^dxgi.IAdapter1,
 	device:                 ^d3d12.IDevice,
 	cmd_queue:              ^d3d12.ICommandQueue,
-	pool_surface:           Resource_Pool(5, Surface, D3d12_Swapchain, bool),
+	pool_surface:           Resource_Pool(5, Surface, D3d12_Swapchain, D3d12_Swapchain_Data),
 	pool_cmd_list:          Resource_Pool(10, Command_List, ^d3d12.ICommandList, bool),
 	pool_graphics_pipeline: Resource_Pool(10, Graphics_Pipeline, ^d3d12.IPipelineState, bool),
 	pool_compute_pipeline:  Resource_Pool(10, Compute_Pipeline, ^d3d12.IPipelineState, bool),
@@ -136,25 +141,21 @@ init :: proc() {
 
 @(require_results)
 create_surface :: proc(window: ^sdl.Window) -> Surface {
-	w, h: i32
-
-	if !sdl.GetWindowSize(window, &w, &h) {
-		panic("Failed to get window size")
-	}
-
 	props := sdl.GetWindowProperties(window)
 	hwnd := sdl.GetPointerProperty(props, sdl.PROP_WINDOW_WIN32_HWND_POINTER, nil)
 	window_handle := dxgi.HWND(hwnd)
 
 	hr: d3d12.HRESULT
 
+	flags: dxgi.SWAP_CHAIN
+
 	swapchain: ^dxgi.ISwapChain3
 	hr = ctx.factory->CreateSwapChainForHwnd(
 		cast(^dxgi.IUnknown)ctx.cmd_queue,
 		window_handle,
 		&dxgi.SWAP_CHAIN_DESC1 {
-			Width = u32(w),
-			Height = u32(h),
+			Width = 0,
+			Height = 0,
 			Format = .R8G8B8A8_UNORM,
 			SampleDesc = {Count = 1},
 			BufferUsage = {.RENDER_TARGET_OUTPUT},
@@ -162,6 +163,7 @@ create_surface :: proc(window: ^sdl.Window) -> Surface {
 			Scaling = .NONE,
 			SwapEffect = .FLIP_DISCARD,
 			AlphaMode = .UNSPECIFIED,
+			Flags = flags,
 		},
 		nil,
 		nil,
@@ -197,11 +199,30 @@ create_surface :: proc(window: ^sdl.Window) -> Surface {
 	return res_pool_insert(
 		&ctx.pool_surface,
 		D3d12_Swapchain{raw = swapchain, rtv_heap = desc_heap},
+		D3d12_Swapchain_Data{},
 	)
 }
 
 configure_surface :: proc(surface: Surface, config: Surface_Config) {
+	surface_data := res_pool_get_cold(&ctx.pool_surface, surface)
+	surface := res_pool_get_hot(&ctx.pool_surface, surface)
 
+	flags: dxgi.SWAP_CHAIN
+
+	#partial switch config.present_mode {
+	case .Immediate:
+		flags += {.ALLOW_TEARING}
+	}
+
+	surface.raw->ResizeBuffers(
+		config.desired_frames_in_flight,
+		config.extent.x,
+		config.extent.y,
+		format_map[config.format],
+		flags,
+	)
+
+	surface_data.config = config
 }
 
 @(require_results)
@@ -302,10 +323,10 @@ destroy_pipeline :: proc(pipeline: Pipeline) {
 
 	switch pip in pipeline {
 	case Graphics_Pipeline:
-		pipeline_state = res_pool_get_hot(&ctx.pool_graphics_pipeline, pip)
+		pipeline_state = res_pool_get_hot(&ctx.pool_graphics_pipeline, pip)^
 
 	case Compute_Pipeline:
-		pipeline_state = res_pool_get_hot(&ctx.pool_compute_pipeline, pip)
+		pipeline_state = res_pool_get_hot(&ctx.pool_compute_pipeline, pip)^
 	}
 
 	pipeline_state->Release()
@@ -394,6 +415,7 @@ submit :: proc(queue: Queue, cmd: Command_List) {
 
 submit_and_present :: proc(cmd: Command_List, surface: Surface) {
 	cmd := cast(^d3d12.IGraphicsCommandList)res_pool_get_hot(&ctx.pool_cmd_list, cmd)
+	surface_data := res_pool_get_cold(&ctx.pool_surface, surface)
 	surface := res_pool_get_hot(&ctx.pool_surface, surface)
 
 	swapchain := surface.raw
@@ -425,7 +447,20 @@ submit_and_present :: proc(cmd: Command_List, surface: Surface) {
 	ctx.cmd_queue->ExecuteCommandLists(1, (^^d3d12.ICommandList)(&cmd))
 
 	// Present
-	hr = swapchain->Present1(1, dxgi.PRESENT{}, &dxgi.PRESENT_PARAMETERS{})
+	sync_interval: u32
+	present_flags: dxgi.PRESENT
+
+	switch surface_data.config.present_mode {
+	case .Fifo:
+		sync_interval = 1
+	case .Immediate:
+		sync_interval = 0
+		present_flags += {.ALLOW_TEARING}
+	case .Mailbox:
+		sync_interval = 0
+	}
+
+	hr = swapchain->Present1(sync_interval, present_flags, &dxgi.PRESENT_PARAMETERS{})
 	check(hr, "Failed to present")
 
 	// Wait for frame to finish
@@ -492,10 +527,10 @@ cmd_bind_pipeline :: proc(cmd: Command_List, pipeline: Pipeline) {
 
 	switch pip in pipeline {
 	case Graphics_Pipeline:
-		pipeline_state = res_pool_get_hot(&ctx.pool_graphics_pipeline, pip)
+		pipeline_state = res_pool_get_hot(&ctx.pool_graphics_pipeline, pip)^
 
 	case Compute_Pipeline:
-		pipeline_state = res_pool_get_hot(&ctx.pool_compute_pipeline, pip)
+		pipeline_state = res_pool_get_hot(&ctx.pool_compute_pipeline, pip)^
 
 	}
 
